@@ -27,6 +27,13 @@ double rng_random_range( struct random_number_generator_t *rng, double min, doub
     return min + ( max - min ) * rng_random_double( rng );
 }
 
+void rng_random_vec3( struct random_number_generator_t *rng, struct vec3_t *v )
+{
+    v->x = rng_random_double( rng );
+    v->y = rng_random_double( rng );
+    v->z = rng_random_double( rng );
+}
+
 void rng_random_vec3_range( struct random_number_generator_t *rng, struct vec3_t *v, double min, double max )
 {
     v->x = rng_random_range( rng, min, max );

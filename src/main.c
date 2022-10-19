@@ -88,28 +88,28 @@ void ray_color( struct vec3_t *out,
 
 void simple_scene( struct hittable_list_t *world )
 {
-    struct lambertian_t *ground_material;
-    struct vec3_t ground_material_albedo;
+    struct lambertian_t *lambertian_material;
+    struct vec3_t color;
     struct sphere_t *ground_sphere;
-    struct dielectric_t *material1;
+    struct dielectric_t *dielectric_material;
     struct lambertian_t *material2;
     struct vec3_t material2_albedo;
-    struct metal_t *material3;
+    struct metal_t *metal_material;
     struct vec3_t material3_albedo;
     struct sphere_t *object1;
     struct sphere_t *object2;
     struct sphere_t *object3;
 
-    vec3_assign_v( &ground_material_albedo, 0.5, 0.5, 0.5 );
-    ground_material = (struct lambertian_t *)malloc( sizeof( struct lambertian_t ) );
-    lambertian_create( ground_material, &ground_material_albedo );
+    vec3_assign_v( &color, 0.5, 0.5, 0.5 );
+    lambertian_material = (struct lambertian_t *)malloc( sizeof( struct lambertian_t ) );
+    lambertian_create( lambertian_material, &color );
     ground_sphere = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
-    sphere_create( ground_sphere, 0.0, -1000.0, 0.0, 1000, (struct material_t *)ground_material );
+    sphere_create( ground_sphere, 0.0, -1000.0, 0.0, 1000, (struct material_t *)lambertian_material );
 
-    material1 = (struct dielectric_t *)malloc( sizeof( struct dielectric_t ) );
-    dielectric_create( material1, 1.5 );
+    dielectric_material = (struct dielectric_t *)malloc( sizeof( struct dielectric_t ) );
+    dielectric_create( dielectric_material, 1.5 );
     object1 = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
-    sphere_create( object1, 0, 1, 0, 1, (struct material_t *)material1 );
+    sphere_create( object1, 0, 1, 0, 1, (struct material_t *)dielectric_material );
 
     vec3_assign_v( &material2_albedo, 0.4, 0.2, 0.1 );
     material2 = (struct lambertian_t *)malloc( sizeof( struct lambertian_t ) );
@@ -118,10 +118,10 @@ void simple_scene( struct hittable_list_t *world )
     sphere_create( object2, -4, 1, 0, 1, (struct material_t *)material2 );
 
     vec3_assign_v( &material3_albedo, 0.7, 0.6, 0.5 );
-    material3 = (struct metal_t *)malloc( sizeof( struct metal_t ) );
-    metal_create( material3, &material3_albedo, 0.0 );
+    metal_material = (struct metal_t *)malloc( sizeof( struct metal_t ) );
+    metal_create( metal_material, &material3_albedo, 0.0 );
     object3 = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
-    sphere_create( object3, 4, 1, 0, 1, (struct material_t *)material3 );
+    sphere_create( object3, 4, 1, 0, 1, (struct material_t *)metal_material );
 
     hittable_list_create( world );
     hittable_list_add( world, (struct hittable_t *)ground_sphere );
@@ -132,7 +132,94 @@ void simple_scene( struct hittable_list_t *world )
 
 void random_scene( struct hittable_list_t *world, struct random_number_generator_t *rng )
 {
-    ;
+    struct sphere_t *sphere_object;
+    struct lambertian_t *lambertian_material;
+    struct dielectric_t *dielectric_material;
+    struct metal_t *metal_material;
+    struct material_t *sphere_material;
+    struct vec3_t color;
+    struct vec3_t world_center;
+    struct vec3_t sphere_center;
+    struct vec3_t distance_to_world_center;
+    double radius = 0.2;
+    double choose_mat;
+    int a;
+    int b;
+
+    hittable_list_create( world );
+
+    vec3_assign_v( &world_center, 4, 0.2, 0 );
+
+    vec3_assign_v( &color, 0.5, 0.5, 0.5 );
+    lambertian_material = (struct lambertian_t *)malloc( sizeof( struct lambertian_t ) );
+    lambertian_create( lambertian_material, &color );
+    sphere_object = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
+    sphere_create( sphere_object, 0.0, -1000.0, 0.0, 1000, (struct material_t *)lambertian_material );
+    hittable_list_add( world, (struct hittable_t *)sphere_object );
+
+    for( a = -11; a < 11; a++ )
+    {
+        for( b = -11; b < 11; b++ )
+        {
+            vec3_assign_v(
+                &sphere_center, a + 0.9 * rng_random_double( rng ), 0.2, b + 0.9 * rng_random_double( rng ) );
+            vec3_sub( &distance_to_world_center, &sphere_center, &world_center );
+
+            if( vec3_length( &distance_to_world_center ) > 0.9 )
+            {
+                choose_mat = rng_random_double( rng );
+                if( choose_mat < 0.8 )
+                {
+                    // diffuse
+                    rng_random_vec3( rng, &color );
+                    lambertian_material = (struct lambertian_t *)malloc( sizeof( struct lambertian_t ) );
+                    lambertian_create( lambertian_material, &color );
+                    sphere_material = (struct material_t *)lambertian_material;
+                }
+                else if( choose_mat < 0.95 )
+                {
+                    // metal
+                    double fuzz = rng_random_range( rng, 0, 0.5 );
+                    rng_random_vec3_range( rng, &color, 0.5, 1 );
+                    metal_material = (struct metal_t *)malloc( sizeof( struct metal_t ) );
+                    metal_create( metal_material, &color, fuzz );
+                    sphere_material = (struct material_t *)metal_material;
+                }
+                else
+                {
+                    // glass
+                    dielectric_material = (struct dielectric_t *)malloc( sizeof( struct dielectric_t ) );
+                    dielectric_create( dielectric_material, 1.5 );
+                    sphere_material = (struct material_t *)dielectric_material;
+                }
+
+                sphere_object = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
+                sphere_create(
+                    sphere_object, sphere_center.x, sphere_center.y, sphere_center.z, radius, sphere_material );
+                hittable_list_add( world, (struct hittable_t *)sphere_object );
+            }
+        }
+    }
+
+    dielectric_material = (struct dielectric_t *)malloc( sizeof( struct dielectric_t ) );
+    dielectric_create( dielectric_material, 1.5 );
+    sphere_object = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
+    sphere_create( sphere_object, 0, 1, 0, 1, (struct material_t *)dielectric_material );
+    hittable_list_add( world, (struct hittable_t *)sphere_object );
+
+    vec3_assign_v( &color, 0.4, 0.2, 0.1 );
+    lambertian_material = (struct lambertian_t *)malloc( sizeof( struct lambertian_t ) );
+    lambertian_create( lambertian_material, &color );
+    sphere_object = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
+    sphere_create( sphere_object, -4, 1, 0, 1, (struct material_t *)lambertian_material );
+    hittable_list_add( world, (struct hittable_t *)sphere_object );
+
+    vec3_assign_v( &color, 0.7, 0.6, 0.5 );
+    metal_material = (struct metal_t *)malloc( sizeof( struct metal_t ) );
+    metal_create( metal_material, &color, 0.0 );
+    sphere_object = (struct sphere_t *)malloc( sizeof( struct sphere_t ) );
+    sphere_create( sphere_object, 4, 1, 0, 1, (struct material_t *)metal_material );
+    hittable_list_add( world, (struct hittable_t *)sphere_object );
 }
 
 int main( int argc, char **argv )
