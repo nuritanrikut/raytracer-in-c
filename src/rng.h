@@ -10,7 +10,7 @@ struct random_number_generator_t
 };
 
 void rng_create( struct random_number_generator_t *rng );
-void rng_destroy( struct random_number_generator_t *rng );
+void rng_clone( struct random_number_generator_t *out, struct random_number_generator_t *in );
 
 double rng_random_double( struct random_number_generator_t *rng );
 double rng_random_range( struct random_number_generator_t *rng, double min, double max );

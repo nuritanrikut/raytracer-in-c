@@ -14,10 +14,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <error.h>
 
 void ray_color( struct vec3_t *out,
-                int i,
-                int j,
+                int row,
+                int col,
                 const struct ray_t *r,
                 const struct hittable_list_t *world,
                 int depth,
@@ -46,15 +47,15 @@ void ray_color( struct vec3_t *out,
         {
             struct vec3_t recursed_color;
             vec3_assign_v( &recursed_color, 0.0, 0.0, 0.0 );
-            ray_color( &recursed_color, i, j, &scattered, world, depth - 1, rng );
+            ray_color( &recursed_color, row, col, &scattered, world, depth - 1, rng );
             vec3_mult( out, &attenuation, &recursed_color );
 
             // fprintf( stderr,
             //          "> Scatter %d %d dir=(%.4lf, %.4lf, %.4lf) attenuation=(%.4lf, %.4lf, %.4lf) "
             //          "recursed_color=(%.4lf, %.4lf, "
             //          "%.4lf) out=(%.4lf, %.4lf, %.4lf)\n",
-            //          i,
-            //          j,
+            //          col,
+            //          row,
             //          r->direction.x,
             //          r->direction.y,
             //          r->direction.z,
@@ -71,7 +72,7 @@ void ray_color( struct vec3_t *out,
         }
 
         ( *rec.material.diffuse )( rec.material.data, out );
-        // fprintf( stderr, "> Diffuse %d %d = (%.4lf, %.4lf, %.4lf)\n", i, j, out->x, out->y, out->z );
+        // fprintf( stderr, "> Diffuse %d %d = (%.4lf, %.4lf, %.4lf)\n", row, col, out->x, out->y, out->z );
         return;
     }
 
@@ -83,7 +84,7 @@ void ray_color( struct vec3_t *out,
     vec3_scale( &blue, t );
     vec3_add( out, &white, &blue );
 
-    // fprintf( stderr, "> Sky %d %d =(%.4lf, %.4lf, %.4lf)\n", i, j, out->x, out->y, out->z );
+    // fprintf( stderr, "> Sky %d %d =(%.4lf, %.4lf, %.4lf)\n", row, col, out->x, out->y, out->z );
 }
 
 void simple_scene( struct hittable_list_t *world )
@@ -222,6 +223,45 @@ void random_scene( struct hittable_list_t *world, struct random_number_generator
     hittable_list_add( world, (struct hittable_t *)sphere_object );
 }
 
+struct Job
+{
+    struct vec3_t *color;
+    struct random_number_generator_t rng;
+    int row;
+    int col;
+};
+
+void render( struct Job *job,
+             struct hittable_list_t *world,
+             struct camera_t *cam,
+             int image_width,
+             int image_height,
+             int samples_per_pixel_x,
+             int samples_per_pixel_y,
+             int max_depth )
+{
+    int samples_per_pixel = samples_per_pixel_x * samples_per_pixel_y;
+
+    vec3_assign_v( job->color, 0, 0, 0 );
+
+    for( int sample = 0; sample < samples_per_pixel; sample++ )
+    {
+        struct vec3_t sample_color;
+        struct ray_t r;
+        int sample_y = sample / samples_per_pixel_y;
+        int sample_x = sample % samples_per_pixel_y;
+        double y = (double)sample_y / samples_per_pixel_y - 0.5;
+        double x = (double)sample_x / samples_per_pixel_x - 0.5;
+        double u = ( job->col + x ) / ( image_width - 1 );
+        double v = ( job->row + y ) / ( image_height - 1 );
+
+        vec3_assign_v( &sample_color, 0.0, 0.0, 0.0 );
+        camera_get_ray( cam, &r, &job->rng, u, v );
+        ray_color( &sample_color, job->row, job->col, &r, world, max_depth, &job->rng );
+        vec3_add_assign( job->color, &sample_color );
+    }
+}
+
 int main( int argc, char **argv )
 {
     // Image
@@ -231,6 +271,7 @@ int main( int argc, char **argv )
     int samples_per_pixel_x = 16;
     int samples_per_pixel_y = 16;
     int max_depth = 50;
+    int samples_per_pixel = samples_per_pixel_x * samples_per_pixel_y;
 
     // Camera
     struct vec3_t lookfrom;
@@ -246,6 +287,14 @@ int main( int argc, char **argv )
 
     // World
     struct hittable_list_t world;
+
+    // Render
+    struct vec3_t **pixels; // [row][col]
+    struct Job *jobs;
+    int job_count = image_height * image_width;
+    int job_index = 0;
+    int remaining_jobs;
+    int remaining_lines;
 
     //------
 
@@ -280,34 +329,66 @@ int main( int argc, char **argv )
     }
 
     // Render
+    jobs = (struct Job *)malloc( job_count * sizeof( struct Job ) );
+    if( !jobs )
+    {
+        error( 1, 0, "Cannot alloc jobs\n" );
+    }
+    memset( jobs, 0, job_count * sizeof( struct Job ) );
+    pixels = (struct vec3_t **)malloc( image_height * sizeof( struct vec3_t * ) );
+    if( !pixels )
+    {
+        error( 1, 0, "Cannot alloc pixels\n" );
+    }
+    job_index = 0;
+    for( int row = 0; row < image_height; row++ )
+    {
+        pixels[row] = (struct vec3_t *)malloc( image_width * sizeof( struct vec3_t ) );
+        if( !pixels[row] )
+        {
+            error( 1, 0, "Cannot alloc row\n" );
+        }
+        memset( pixels[row], 0, image_width * sizeof( struct vec3_t ) );
+        for( int col = 0; col < image_width; col++ )
+        {
+            jobs[job_index].color = &pixels[row][col];
+            jobs[job_index].row = row;
+            jobs[job_index].col = col;
+            rng_clone( &jobs[job_index].rng, &rng );
+            job_index++;
+        }
+    }
+
+    remaining_jobs = job_count;
+    remaining_lines = image_height;
+#pragma omp parallel for shared( remaining_jobs, remaining_lines )
+    for( job_index = 0; job_index < job_count; job_index++ )
+    {
+        if( remaining_jobs % image_width == 0 )
+        {
+            remaining_lines--;
+            fprintf( stderr, "Lines remaining: %d  \r", remaining_lines );
+        }
+        render( &jobs[job_index],
+                &world,
+                &cam,
+                image_width,
+                image_height,
+                samples_per_pixel_x,
+                samples_per_pixel_y,
+                max_depth );
+        remaining_jobs--;
+    }
+    fprintf( stderr, "Lines remaining: 0  \n" );
+    fprintf( stderr, "Jobs finished\n" );
+    fprintf( stderr, "Writing image\n" );
 
     printf( "P3\n%d %d\n255\n", image_width, image_height );
-    for( int j = image_height - 1; j >= 0; j-- )
+    for( int row = image_height - 1; row >= 0; row-- )
     {
-        fprintf( stderr, "Scanlines remaining: %d\n", j );
-        for( int i = 0; i < image_width; i++ )
+        for( int col = 0; col < image_width; col++ )
         {
-            struct vec3_t pixel_color;
-            int s = 0;
-            vec3_assign_v( &pixel_color, 0.0, 0.0, 0.0 );
-            // #pragma omp parallel for shared( pixel_color ) private( s )
-            for( s = 0; s < samples_per_pixel_x * samples_per_pixel_y; ++s )
-            {
-                struct ray_t r;
-                struct vec3_t color;
-                int sample_y = s / samples_per_pixel_y;
-                int sample_x = s % samples_per_pixel_y;
-                double y = (double)sample_y / samples_per_pixel_y - 0.5;
-                double x = (double)sample_x / samples_per_pixel_x - 0.5;
-                double u = ( i + x ) / ( image_width - 1 );
-                double v = ( j + y ) / ( image_height - 1 );
-                vec3_assign_v( &color, 0, 0, 0 );
-                camera_get_ray( &cam, &r, &rng, u, v );
-                ray_color( &color, i, j, &r, &world, max_depth, &rng );
-                vec3_add_assign( &pixel_color, &color );
-            }
-
-            vec3_write_color( stdout, &pixel_color, samples_per_pixel_x * samples_per_pixel_y );
+            vec3_write_color( stdout, &pixels[row][col], samples_per_pixel );
         }
     }
 

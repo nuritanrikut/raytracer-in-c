@@ -9,6 +9,13 @@ void rng_create( struct random_number_generator_t *rng )
     rng->mod = 1000000;
 }
 
+void rng_clone( struct random_number_generator_t *out, struct random_number_generator_t *in )
+{
+    out->state = in->state;
+    out->div = in->div;
+    out->mod = in->mod;
+}
+
 unsigned long next( struct random_number_generator_t *rng )
 {
     rng->state = rng->state * rng->state / rng->div % rng->mod;
