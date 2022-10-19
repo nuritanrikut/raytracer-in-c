@@ -1,0 +1,9 @@
+/.vscode/
+/build/
+
+/*.ppm
+/*.png
+/*.txt
+
+!/CMakeLists.txt
+!/sample.png
